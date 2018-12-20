@@ -2,8 +2,6 @@
 
 set -x
 
-logile=/home/flo/win10-vfio.log
-
 # from lspci -nn
 videoid="10de 13c2"
 audioid="10de 0fbb"
