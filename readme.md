@@ -5,7 +5,9 @@
 > I'm not the Author of the script
 
 cp hooks-qemu to /etc/libvirt/hooks/qemu
+
 chmod +x /etc/libvirt/hooks/qemu
+
 edit and change vm name
 
 ## GPU ROM
