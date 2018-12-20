@@ -1,0 +1,97 @@
+#!/bin/bash
+
+set -x
+
+logile=/home/flo/win10-vfio.log
+
+# from lspci -nn
+videoid="10de 13c2"
+audioid="10de 0fbb"
+videobusid="0000:08:00.0"
+audiobusid="0000:08:00.1"
+
+# prepare, start, stop, release
+
+function __killgpuapp() {
+	for y in $(lsof -t /dev/nvidia0); do
+		kill $y
+	done
+}
+
+function __unloadNvidia() {
+
+	modprobe -r nvidia_uvm
+	sleep 1
+	modprobe -r nvidia_drm
+	sleep 1
+	modprobe -r nvidia_modeset
+	sleep 1
+	modprobe -r nvidia
+	sleep 1
+}
+
+function __prepare() {
+  
+ 	echo "prepare" > logfile
+
+    systemctl isolate multi-user.target
+	sleep 2
+    __killgpuapp
+    sleep 2
+
+    # load the module
+    #modprobe vfio-pci
+
+    # Kill the console to free the GPU
+    echo 0 > /sys/class/vtconsole/vtcon0/bind
+    echo 0 > /sys/class/vtconsole/vtcon1/bind
+
+    echo efi-framebuffer.0 > /sys/bus/platform/drivers/efi-framebuffer/unbind
+
+    # Detach the GPU from drivers and attach to vfio.
+    echo $videoid > /sys/bus/pci/drivers/vfio-pci/new_id
+    echo $audioid > /sys/bus/pci/drivers/vfio-pci/new_id
+    echo $videobusid > /sys/bus/pci/devices/$videobusid/driver/unbind
+    echo $audiobusid > /sys/bus/pci/devices/$audiobusid/driver/unbind
+    echo $videobusid > /sys/bus/pci/drivers/vfio-pci/bind
+    echo $audiobusid > /sys/bus/pci/drivers/vfio-pci/bind
+
+}
+
+function __release() {
+
+    # Rebind the GPU to nvidia and snd_hda_intel drivers.
+    echo $videoid > /sys/bus/pci/drivers/vfio-pci/remove_id
+    echo $audioid > /sys/bus/pci/drivers/vfio-pci/remove_id
+    echo $videobusid > /sys/bus/pci/devices/$videobusid/driver/unbind
+    echo $audiobusid > /sys/bus/pci/devices/$audiobusid/driver/unbind
+    echo $videobusid > /sys/bus/pci/drivers/nvidia/bind
+    echo $audiobusid > /sys/bus/pci/drivers/snd_hda_intel/bind
+
+    # Re-Bind EFI-Framebuffer and Re-bind to virtual consoles
+    #echo efi-framebuffer.0 > /sys/bus/platform/drivers/efi-framebuffer/bind
+    echo 1 > /sys/class/vtconsole/vtcon0/bind
+    echo 1 > /sys/class/vtconsole/vtcon1/bind
+
+	systemctl isolate graphical.target
+
+	sleep 2
+
+	echo efi-framebuffer.0 > /sys/bus/platform/drivers/efi-framebuffer/bind
+
+
+}
+
+if [ "${2}" = "prepare" ]; then
+	if [ "${1}" = "win10-vfio" ]; then
+		__prepare
+	fi
+fi
+
+if [ "${2}" = "release" ]; then
+        if [ "${1}" = "win10-vfio" ]; then
+                __release
+        fi
+fi
+
+
