@@ -23,24 +23,24 @@ function __killgpuapp() {
 	done
 }
 
-function __unloadNvidia() {
-
-	modprobe -r nvidia_uvm
-	sleep 1
-	modprobe -r nvidia_drm
-	sleep 1
-	modprobe -r nvidia_modeset
-	sleep 1
-	modprobe -r nvidia
-	sleep 1
-}
+#function __unloadNvidia() {
+#
+#	modprobe -r nvidia_uvm
+#	sleep 1
+#	modprobe -r nvidia_drm
+#	sleep 1
+#	modprobe -r nvidia_modeset
+#	sleep 1
+#	modprobe -r nvidia
+#	sleep 1
+#}
 
 function __prepare() {
   
  	echo "prepare" > logfile
 
-    systemctl isolate multi-user.target
-	sleep 2
+    #systemctl isolate multi-user.target
+    systemctl stop display-manager
     __killgpuapp
     sleep 2
 
@@ -54,8 +54,8 @@ function __prepare() {
     echo efi-framebuffer.0 > /sys/bus/platform/drivers/efi-framebuffer/unbind
 
     # Detach the GPU from drivers and attach to vfio.
-    echo $videoid > /sys/bus/pci/drivers/vfio-pci/new_id
-    echo $audioid > /sys/bus/pci/drivers/vfio-pci/new_id
+    echo "$videoid" > /sys/bus/pci/drivers/vfio-pci/new_id
+    echo "$audioid" > /sys/bus/pci/drivers/vfio-pci/new_id
     echo $videobusid > /sys/bus/pci/devices/$videobusid/driver/unbind
     echo $audiobusid > /sys/bus/pci/devices/$audiobusid/driver/unbind
     echo $videobusid > /sys/bus/pci/drivers/vfio-pci/bind
@@ -66,8 +66,8 @@ function __prepare() {
 function __release() {
 
     # Rebind the GPU to nvidia and snd_hda_intel drivers.
-    echo $videoid > /sys/bus/pci/drivers/vfio-pci/remove_id
-    echo $audioid > /sys/bus/pci/drivers/vfio-pci/remove_id
+    echo "$videoid" > /sys/bus/pci/drivers/vfio-pci/remove_id
+    echo "$audioid" > /sys/bus/pci/drivers/vfio-pci/remove_id
     echo $videobusid > /sys/bus/pci/devices/$videobusid/driver/unbind
     echo $audiobusid > /sys/bus/pci/devices/$audiobusid/driver/unbind
     echo $videobusid > /sys/bus/pci/drivers/nvidia/bind
@@ -78,7 +78,8 @@ function __release() {
     echo 1 > /sys/class/vtconsole/vtcon0/bind
     echo 1 > /sys/class/vtconsole/vtcon1/bind
 
-	systemctl isolate graphical.target
+	#systemctl isolate graphical.target
+    systemctl start display-manager
 
 	sleep 2
 
