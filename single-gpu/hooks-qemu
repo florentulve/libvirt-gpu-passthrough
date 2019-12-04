@@ -2,11 +2,15 @@
 
 set -x
 
+logfile=/root/qemu_hooks_log
+
 # from lspci -nn
 videoid="10de 13c2"
 audioid="10de 0fbb"
+usbid="10de 1ad8"
 videobusid="0000:08:00.0"
 audiobusid="0000:08:00.1"
+usbbusid="0000:08:00.2"
 
 HUGEPAGES_SIZE=$(grep Hugepagesize /proc/meminfo | awk {'print $2'})
 #HUGEPAGES_SIZE=$((HUGEPAGES_SIZE * 1024))
@@ -21,95 +25,111 @@ function __killgpuapp() {
 	for y in $(lsof -t /dev/nvidia0); do
 		kill "$y"
 	done
+
+	systemctl --user stop pulseaudio.socket
+	systemctl --user stop pulseaudio
+
+	systemctl --user status pulseaudio >> $logfile
 }
 
-#function __unloadNvidia() {
-#
-#	modprobe -r nvidia_uvm
-#	sleep 1
-#	modprobe -r nvidia_drm
-#	sleep 1
-#	modprobe -r nvidia_modeset
-#	sleep 1
-#	modprobe -r nvidia
-#	sleep 1
-#}
-
 function __prepare() {
-  
- 	echo "prepare" > logfile
+ 	echo "prepare" >> $logfile
 
-    #systemctl isolate multi-user.target
+	who >> $logfile
+
     systemctl stop display-manager
+    #systemctl isolate multi-user.target
     __killgpuapp
     sleep 2
 
-    # load the module
-    #modprobe vfio-pci
+	echo "GPU App Killed" >>$logfile
 
     # Kill the console to free the GPU
     echo 0 > /sys/class/vtconsole/vtcon0/bind
     echo 0 > /sys/class/vtconsole/vtcon1/bind
 
+	echo "vtcon unbinded" >>$logfile
+
     echo efi-framebuffer.0 > /sys/bus/platform/drivers/efi-framebuffer/unbind
 
+	echo "efi-framebuffer unbinded" >>$logfile
+
     # Detach the GPU from drivers and attach to vfio.
-    echo "$videoid" > /sys/bus/pci/drivers/vfio-pci/new_id
-    echo "$audioid" > /sys/bus/pci/drivers/vfio-pci/new_id
+    echo $videoid > /sys/bus/pci/drivers/vfio-pci/new_id
+    echo $audioid > /sys/bus/pci/drivers/vfio-pci/new_id
+    echo $usbid > /sys/bus/pci/drivers/vfio-pci/new_id
     echo $videobusid > /sys/bus/pci/devices/$videobusid/driver/unbind
+    echo "gpu unbinded" >>$logfile
     echo $audiobusid > /sys/bus/pci/devices/$audiobusid/driver/unbind
+    echo "audio gpu unbinded" >>$logfile
+    echo $usbid > /sys/bus/pci/devices/$usbid/xhci_hcd/unbind
+    echo "usb controller gpu unbinded" >>$logfile
     echo $videobusid > /sys/bus/pci/drivers/vfio-pci/bind
     echo $audiobusid > /sys/bus/pci/drivers/vfio-pci/bind
+    echo $usbbusid > /sys/bus/pci/drivers/vfio-pci/bind
+    echo "gpu binded to vfio" >>$logfile
 
 }
 
 function __release() {
 
+	echo "release" >>$logfile
+	tty >>$logfile 
+
     # Rebind the GPU to nvidia and snd_hda_intel drivers.
-    echo "$videoid" > /sys/bus/pci/drivers/vfio-pci/remove_id
-    echo "$audioid" > /sys/bus/pci/drivers/vfio-pci/remove_id
+    echo $videoid > /sys/bus/pci/drivers/vfio-pci/remove_id
+    echo $audioid > /sys/bus/pci/drivers/vfio-pci/remove_id
+    echo $usbid > /sys/bus/pci/drivers/vfio-pci/remove_id
+    
     echo $videobusid > /sys/bus/pci/devices/$videobusid/driver/unbind
     echo $audiobusid > /sys/bus/pci/devices/$audiobusid/driver/unbind
+    echo $usbbusid > /sys/bus/pci/devices/$usbbusid/driver/unbind
+
     echo $videobusid > /sys/bus/pci/drivers/nvidia/bind
     echo $audiobusid > /sys/bus/pci/drivers/snd_hda_intel/bind
+    echo $usbbusid > /sys/bus/pci/drivers/xhci_hcd/bind
 
     # Re-Bind EFI-Framebuffer and Re-bind to virtual consoles
     #echo efi-framebuffer.0 > /sys/bus/platform/drivers/efi-framebuffer/bind
     echo 1 > /sys/class/vtconsole/vtcon0/bind
     echo 1 > /sys/class/vtconsole/vtcon1/bind
 
-	#systemctl isolate graphical.target
-    systemctl start display-manager
-
+	sleep 2
+	kill $(pgrep -u $(whoami) systemd)
+	sleep 2
+	systemctl start display-manager.service
 	sleep 2
 
 	echo efi-framebuffer.0 > /sys/bus/platform/drivers/efi-framebuffer/bind
 }
 
 function __setpages() {
-    sync
+    echo "set hugepages" >>$logfile
+
+	sync
     echo 3 > /proc/sys/vm/drop_caches
     echo 1 > /proc/sys/vm/compact_memory
 
     VM_HUGEPAGES_TOTAL=$(($HUGEPAGES_ALLOCATED + $VM_HUGEPAGES_NEED))
-    sysctl vm.nr_hugepages=$VM_HUGEPAGES_TOTAL
+    sysctl vm.nr_hugepages=$VM_HUGEPAGES_TOTAL >>$logfile
 
     if [[ $HUGEPAGES_ALLOCATED == '0' ]];
     then
         # Reduce VM jitter: https://www.kernel.org/doc/Documentation/kernel-per-CPU-kthreads.txt
-        sysctl vm.stat_interval=120
+        sysctl vm.stat_interval=120 >>$logfile
+        #sysctl -w kernel.watchdog=0
 
-        sysctl -w kernel.watchdog=0
         # the kernel's dirty page writeback mechanism uses kthread workers. They introduce
         # massive arbitrary latencies when doing disk writes on the host and aren't
         # migrated by cset. Restrict the workqueue to use only cpu 0.
-        #echo $HOST_CORES_MASK > /sys/bus/workqueue/devices/writeback/cpumask
+        echo 0003 > /sys/bus/workqueue/devices/writeback/cpumask
+
         # THP can allegedly result in jitter. Better keep it off.
         echo never > /sys/kernel/mm/transparent_hugepage/enabled
+
         # Force P-states to P0
         #echo performance | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
         echo 0 > /sys/bus/workqueue/devices/writeback/numa
-        #>&2 echo "VMs Shielded"
     fi
 
 }
@@ -118,32 +138,36 @@ function __setpages() {
 function __unsetpages() {
     VM_HUGEPAGES_TOTAL=$(($HUGEPAGES_ALLOCATED - $VM_HUGEPAGES_NEED))
     VM_HUGEPAGES_TOTAL=$(($VM_HUGEPAGES_TOTAL<0?0:$VM_HUGEPAGES_TOTAL))
-    sysctl vm.nr_hugepages=$VM_HUGEPAGES_TOTAL
+    sysctl vm.nr_hugepages=$VM_HUGEPAGES_TOTAL >>$logfile
 
     if [[ $VM_HUGEPAGES_TOTAL == '0' ]];
     then
         # All VMs offline
-        sysctl vm.stat_interval=1
-        sysctl -w kernel.watchdog=1
-        #unshield_vm
-        echo always > /sys/kernel/mm/transparent_hugepage/enabled
+        sysctl vm.stat_interval=1 >>$logfile
+        #sysctl -w kernel.watchdog=1
+
+        echo madvise > /sys/kernel/mm/transparent_hugepage/enabled
         #echo ondemand | tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
         echo 1 > /sys/bus/workqueue/devices/writeback/numa
-        #>&2 echo "VMs UnShielded"
+		echo ffff > /sys/bus/workqueue/devices/writeback/cpumask
+
     fi
 }
 
 
 if [ "${2}" = "prepare" ]; then
 	if [ "${1}" = "win10-vfio" ]; then
-		__prepare
-        #__setpages
+	    touch $logfile
+		echo "Preparing ${1}" > $logfile
+        __prepare
+        __setpages
 	fi
 fi
 
 if [ "${2}" = "release" ]; then
-        if [ "${1}" = "win10-vfio" ]; then
-            __release
-            #__unsetpages
-        fi
+    if [ "${1}" = "win10-vfio" ]; then
+        echo "releasing ${1}"
+        __release
+        __unsetpages
+    fi
 fi
