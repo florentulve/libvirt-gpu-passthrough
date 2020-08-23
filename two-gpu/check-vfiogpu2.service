@@ -1,0 +1,12 @@
+[Unit]
+Description=set nvidia rtx 2070 to vfio mode
+After=libvirt-bin.service
+Before=gdm.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/check-vfiogpu2.sh
+RemainAfterExit=yes
+
+[Install]
+RequiredBy=gdm.service

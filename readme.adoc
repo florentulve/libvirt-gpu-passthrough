@@ -1,0 +1,109 @@
+=  VFIO
+
+== Enable IOMMU kernel module
+
+Append to GRUB_CMDLINE_LINUX in /etc/default/grub to enable iommu and load our vfio-pci driver. We do this early to ensure vfio is able to claim the devices before the kernel does.
+
+GRUB_CMDLINE_LINUX="amd_iommu=on iommu=pt rd.driver.pre=vfio-pci"
+
+Update grubfile
+
+```
+grub2-mkconfig > /etc/grub2-efi.cfg
+```
+
+
+
+== Single GPU passtgrought with kvm/qemu/libvirt
+
+=== Install libvirt qemu hooks
+
+This scripts:
+- bin/unbind GPU
+- start/stop display-manager.service
+- stop app using gpu
+
+Installation:
+
+----
+cp ./single-gpu/hooks-qemu etc/libvirt/hooks/qemu
+chmod +x /etc/libvirt/hooks/qemu
+----
+
+== Multi GPU with 2 Nvidia cards and Nvidia driver
+
+Thanks to link:https://qubitrenegade.com/virtualization/kvm/vfio/2019/07/17/VFIO-Fedora-Notes.html[qubitrenegade.com/ - VFIO-Fedora-Notes]
+
+
+[quote, qubitrenegade.com]
+Card must be bind early to vfio, so we need to load vfio in intramfs and tell the module to bind the card
+
+
+
+- Create /etc/modprobe.d/vfio.conf to tell modprobe how to load vfio-pci
+
+----
+install vfio-pci /sbin/vfio-pci-override.sh
+----
+
+
+Dracut Config
+
+- Create /etc/dracut.conf.d/vfio.conf to load our drivers and setup script into our initramfs.
+
+----
+add_drivers+="vfio vfio_iommu_type1 vfio_pci vfio_virqfd"
+install_items+="/sbin/vfio-pci-override.sh /usr/bin/dirname"
+----
+
+- update initramfs
+
+----
+dracut -f --regenerate-all
+----
+
+or
+
+----
+dracut -f --kver $(uname -r)
+----
+
+- Systemd service
+
+Copy check-vfiogpu2.sh to /usr/local/bin
+Install and enable check-vfiogpu2.service
+
+
+=== Tips
+
+==== Realtime config
+
+http://linuxrealtime.org/index.php/Improving_the_Real-Time_Properties
+
+==== GPU ROM
+
+Gpu dump method <https://github.com/joeknock90/Single-GPU-Passthrough>
+
+==== User Hugepage
+
+```
+<memoryBacking>
+<hugepages/>
+</memoryBacking>
+```
+
+https://libvirt.org/formatdomain.html#elementsMemoryBacking
+
+A tester:
+  <memoryBacking>
+    <hugepages>
+      <page size="1" unit="G" nodeset="0-3,5"/>
+      <page size="2" unit="M" nodeset="4"/>
+    </hugepages>
+    <nosharepages/>
+    <locked/>
+    <source type="file|anonymous|memfd"/>
+    <access mode="shared|private"/>
+    <allocation mode="immediate|ondemand"/>
+    <discard/>
+  </memoryBacking>

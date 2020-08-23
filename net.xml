@@ -1,0 +1,6 @@
+<network>
+  <name>win10</name>
+  <bridge name="virbr10" />
+  <forward mode="route" />
+  <ip address="10.10.120.1" netmask="255.255.255.0" />
+</network>

@@ -160,7 +160,7 @@ if [ "${2}" = "prepare" ]; then
 	    touch $logfile
 		echo "Preparing ${1}" > $logfile
         __prepare
-        __setpages
+        #__setpages
 	fi
 fi
 
@@ -168,6 +168,6 @@ if [ "${2}" = "release" ]; then
     if [ "${1}" = "win10-vfio" ]; then
         echo "releasing ${1}"
         __release
-        __unsetpages
+        #__unsetpages
     fi
 fi
